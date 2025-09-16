@@ -1,0 +1,50 @@
+{
+    "configurations": [
+        {
+            "type": "java",
+            "name": "PasswordEncoderExample",
+            "request": "launch",
+            "mainClass": "com.vnair.user.config.PasswordEncoderExample",
+            "projectName": "user-management-api"
+        },
+        {
+            "type": "java",
+            "name": "aaa",
+            "request": "launch",
+            "mainClass": "com.vnair.user.controller.aaa",
+            "projectName": "user-management-api"
+        },
+        {
+            "type": "java",
+            "name": "Spring Boot-UserManagementApiApplication<user-management-api>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "com.vnair.usermanagement.UserManagementApiApplication",
+            "projectName": "user-management-api",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env",
+            "vmArgs": " -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=64212 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Dspring.jmx.enabled=true -Djava.rmi.server.hostname=localhost -Dspring.application.admin.enabled=true -Dspring.boot.project.name=user-management-api"
+        },
+        {
+            "type": "java",
+            "name": "Spring Boot-PasswordTest<user-management-api>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "com.vnair.usermanagement.test.PasswordTest",
+            "projectName": "user-management-api",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "type": "java",
+            "name": "Spring Boot-UserManagementApiApplication<user-management-api>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "com.vnair.UserManagementApiApplication",
+            "projectName": "user-management-api",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env",
+            "vmArgs": " -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=51878 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Dspring.jmx.enabled=true -Djava.rmi.server.hostname=localhost -Dspring.application.admin.enabled=true -Dspring.boot.project.name=user-management-api"
+        }
+    ]
+}

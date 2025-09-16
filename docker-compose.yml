@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: vnair_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: vnair_user_db
+    volumes:
+      - postgres_data_new:/var/lib/postgresql/data
+      - ./src/main/resources/database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5431:5432"
+
+volumes:
+  postgres_data_new:
