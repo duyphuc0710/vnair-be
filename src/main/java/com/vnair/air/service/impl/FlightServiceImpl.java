@@ -44,39 +44,21 @@ public class FlightServiceImpl implements FlightService {
     public FlightResponse createFlight(FlightCreateRequest request) {
         log.info("Creating flight from airport {} to {}", request.getDepartureAirportId(), request.getArrivalAirportId());
         
-        AirplaneModel airplane = airplaneRepository.findById(request.getAirplaneId())
-                .orElseThrow(() -> new AirplaneNotFoundException("Airplane not found with ID: " + request.getAirplaneId()));
+        // Validate and fetch entities
+        AirplaneModel airplane = validateAndFetchAirplane(request.getAirplaneId());
+        AirportModel departureAirport = validateAndFetchDepartureAirport(request.getDepartureAirportId());
+        AirportModel arrivalAirport = validateAndFetchArrivalAirport(request.getArrivalAirportId());
         
-        AirportModel departureAirport = airportRepository.findById(request.getDepartureAirportId())
-                .orElseThrow(() -> new AirportNotFoundException("Departure airport not found with ID: " + request.getDepartureAirportId()));
+        // Validate business rules
+        validateFlightTimes(request.getDepartureTime(), request.getArrivalTime());
         
-        AirportModel arrivalAirport = airportRepository.findById(request.getArrivalAirportId())
-                .orElseThrow(() -> new AirportNotFoundException("Arrival airport not found with ID: " + request.getArrivalAirportId()));
-        
-        if (request.getDepartureTime().after(request.getArrivalTime())) {
-            throw new AirportNotFoundException("Departure time must be before arrival time");
-        }
-        
-        FlightModel flight = new FlightModel();
-        flight.setAirplane(airplane);
-        flight.setDepartureAirport(departureAirport);
-        flight.setArrivalAirport(arrivalAirport);
-        flight.setDepartureTime(request.getDepartureTime());
-        flight.setArrivalTime(request.getArrivalTime());
-        flight.setBasePrice(request.getBasePrice());
-        flight.setStatus(FlightStatus.SCHEDULED);
-        
+        // Create and save flight entity
+        FlightModel flight = createFlightEntity(airplane, departureAirport, arrivalAirport, request);
         FlightModel savedFlight = flightRepository.save(flight);
         log.info("Successfully created flight with ID: {}", savedFlight.getId());
         
-        // Generate tickets automatically based on airplane seat capacity and ticket types
-        try {
-            ticketService.generateTicketsForFlight(savedFlight.getId());
-            log.info("Successfully generated tickets for flight ID: {}", savedFlight.getId());
-        } catch (Exception e) {
-            log.error("Failed to generate tickets for flight ID: {}", savedFlight.getId(), e);
-            // Continue without failing the flight creation
-        }
+        // Handle side effects
+        handleTicketGenerationForNewFlight(savedFlight.getId());
         
         return mapToResponse(savedFlight);
     }
@@ -85,49 +67,24 @@ public class FlightServiceImpl implements FlightService {
     public FlightResponse updateFlight(Long id, FlightUpdateRequest request) {
         log.info("Updating flight with ID: {}", id);
         
-        FlightModel flight = flightRepository.findById(id)
-                .orElseThrow(() -> new FlightNotFoundException("Flight not found with ID: " + id));
+        // Validate and fetch flight
+        FlightModel flight = validateAndFetchFlight(id);
         
-        if (request.getAirplaneId() != null) {
-            AirplaneModel airplane = airplaneRepository.findById(request.getAirplaneId())
-                    .orElseThrow(() -> new IllegalArgumentException("Airplane not found with ID: " + request.getAirplaneId()));
-            flight.setAirplane(airplane);
-        }
+        // Update airplane if provided
+        updateFlightAirplane(flight, request.getAirplaneId());
         
-        if (request.getDepartureAirportId() != null) {
-            AirportModel departureAirport = airportRepository.findById(request.getDepartureAirportId())
-                    .orElseThrow(() -> new IllegalArgumentException("Departure airport not found with ID: " + request.getDepartureAirportId()));
-            flight.setDepartureAirport(departureAirport);
-        }
+        // Update airports if provided
+        updateFlightDepartureAirport(flight, request.getDepartureAirportId());
+        updateFlightArrivalAirport(flight, request.getArrivalAirportId());
         
-        if (request.getArrivalAirportId() != null) {
-            AirportModel arrivalAirport = airportRepository.findById(request.getArrivalAirportId())
-                    .orElseThrow(() -> new IllegalArgumentException("Arrival airport not found with ID: " + request.getArrivalAirportId()));
-            flight.setArrivalAirport(arrivalAirport);
-        }
+        // Update times if provided
+        updateFlightTimes(flight, request.getDepartureTime(), request.getArrivalTime());
         
-        if (request.getDepartureTime() != null) {
-            flight.setDepartureTime(request.getDepartureTime());
-        }
+        // Update other fields if provided
+        updateFlightOtherFields(flight, request);
         
-        if (request.getArrivalTime() != null) {
-            flight.setArrivalTime(request.getArrivalTime());
-        }
-        
-        if (request.getBasePrice() != null) {
-            flight.setBasePrice(request.getBasePrice());
-        }
-        
-        if (request.getStatus() != null) {
-            flight.setStatus(request.getStatus());
-        }
-        
-        // Validate time logic if both times are set
-        if (flight.getDepartureTime() != null && flight.getArrivalTime() != null) {
-            if (flight.getDepartureTime().after(flight.getArrivalTime())) {
-                throw new FlightNotFoundException("Departure time must be before arrival time");
-            }
-        }
+        // Validate updated flight times
+        validateUpdatedFlightTimes(flight);
         
         FlightModel savedFlight = flightRepository.save(flight);
         log.info("Successfully updated flight with ID: {}", savedFlight.getId());
@@ -140,8 +97,7 @@ public class FlightServiceImpl implements FlightService {
     public FlightResponse getFlightById(Long id) {
         log.info("Getting flight by ID: {}", id);
         
-        FlightModel flight = flightRepository.findById(id)
-                .orElseThrow(() -> new FlightNotFoundException("Flight not found with ID: " + id));
+        FlightModel flight = validateAndFetchFlight(id);
         
         return mapToResponse(flight);
     }
@@ -160,9 +116,7 @@ public class FlightServiceImpl implements FlightService {
     public void deleteFlight(Long id) {
         log.info("Deleting flight with ID: {}", id);
         
-        if (!flightRepository.existsById(id)) {
-            throw new FlightNotFoundException("Flight not found with ID: " + id);
-        }
+        validateFlightExists(id);
         
         flightRepository.deleteById(id);
         log.info("Successfully deleted flight with ID: {}", id);
@@ -232,29 +186,15 @@ public class FlightServiceImpl implements FlightService {
     public FlightResponse updateFlightStatus(Long id, FlightStatus status) {
         log.info("Updating flight status for ID: {} to {}", id, status);
         
-        FlightModel flight = flightRepository.findById(id)
-                .orElseThrow(() -> new FlightNotFoundException("Flight not found with ID: " + id));
-        
+        FlightModel flight = validateAndFetchFlight(id);
         FlightStatus oldStatus = flight.getStatus();
-        flight.setStatus(status);
         
+        // Update status
+        flight.setStatus(status);
         FlightModel savedFlight = flightRepository.save(flight);
         
-        // Handle status change business logic
-        if (status == FlightStatus.CANCELED && oldStatus != FlightStatus.CANCELED) {
-            log.info("Flight {} has been canceled, handling related bookings and tickets", id);
-            
-            try {
-                ticketService.updateTicketStatusByFlight(id, TicketStatus.AVAILABLE);
-                log.info("Updated all tickets for flight {} to AVAILABLE status", id);
-                
-               
-                log.info("Flight cancellation processing completed for flight {}", id);
-                
-            } catch (Exception e) {
-                log.error("Error processing flight cancellation for flight {}", id, e);
-            }
-        }
+        // Handle status change side effects
+        handleFlightStatusChangeEffects(savedFlight.getId(), status, oldStatus);
         
         return mapToResponse(savedFlight);
     }
@@ -279,5 +219,201 @@ public class FlightServiceImpl implements FlightService {
                 .createdAt(flight.getCreatedAt())
                 .updatedAt(flight.getUpdatedAt())
                 .build();
+    }
+
+    // =========================== UTILITY METHODS ===========================
+
+    /**
+     * Validate and fetch airplane by ID
+     * Single Responsibility: Only handles airplane validation and fetching
+     */
+    private AirplaneModel validateAndFetchAirplane(Integer airplaneId) {
+        return airplaneRepository.findById(airplaneId)
+                .orElseThrow(() -> new AirplaneNotFoundException("Airplane not found with ID: " + airplaneId));
+    }
+
+    /**
+     * Validate and fetch departure airport by ID
+     * Single Responsibility: Only handles departure airport validation and fetching
+     */
+    private AirportModel validateAndFetchDepartureAirport(Integer departureAirportId) {
+        return airportRepository.findById(departureAirportId)
+                .orElseThrow(() -> new AirportNotFoundException("Departure airport not found with ID: " + departureAirportId));
+    }
+
+    /**
+     * Validate and fetch arrival airport by ID
+     * Single Responsibility: Only handles arrival airport validation and fetching
+     */
+    private AirportModel validateAndFetchArrivalAirport(Integer arrivalAirportId) {
+        return airportRepository.findById(arrivalAirportId)
+                .orElseThrow(() -> new AirportNotFoundException("Arrival airport not found with ID: " + arrivalAirportId));
+    }
+
+    /**
+     * Validate and fetch flight by ID
+     * Single Responsibility: Only handles flight validation and fetching
+     */
+    private FlightModel validateAndFetchFlight(Long flightId) {
+        return flightRepository.findById(flightId)
+                .orElseThrow(() -> new FlightNotFoundException("Flight not found with ID: " + flightId));
+    }
+
+    /**
+     * Validate flight departure and arrival times
+     * Single Responsibility: Only handles time validation logic
+     */
+    private void validateFlightTimes(Date departureTime, Date arrivalTime) {
+        if (departureTime.after(arrivalTime)) {
+            throw new IllegalArgumentException("Departure time must be before arrival time");
+        }
+    }
+
+    /**
+     * Create flight entity from request and validated entities
+     * Single Responsibility: Only handles flight entity creation
+     */
+    private FlightModel createFlightEntity(AirplaneModel airplane, AirportModel departureAirport, 
+                                         AirportModel arrivalAirport, FlightCreateRequest request) {
+        FlightModel flight = new FlightModel();
+        flight.setAirplane(airplane);
+        flight.setDepartureAirport(departureAirport);
+        flight.setArrivalAirport(arrivalAirport);
+        flight.setDepartureTime(request.getDepartureTime());
+        flight.setArrivalTime(request.getArrivalTime());
+        flight.setBasePrice(request.getBasePrice());
+        flight.setStatus(FlightStatus.SCHEDULED);
+        return flight;
+    }
+
+    /**
+     * Handle ticket generation for new flight
+     * Single Responsibility: Only handles ticket generation side effect
+     */
+    private void handleTicketGenerationForNewFlight(Long flightId) {
+        try {
+            ticketService.generateTicketsForFlight(flightId);
+            log.info("Successfully generated tickets for flight ID: {}", flightId);
+        } catch (Exception e) {
+            log.error("Failed to generate tickets for flight ID: {}", flightId, e);
+            // Continue without failing the flight creation
+        }
+    }
+
+    // =========================== UPDATE FLIGHT UTILITY METHODS ===========================
+
+    /**
+     * Update flight airplane if provided
+     * Single Responsibility: Only handles airplane update
+     */
+    private void updateFlightAirplane(FlightModel flight, Integer airplaneId) {
+        if (airplaneId != null) {
+            AirplaneModel airplane = validateAndFetchAirplane(airplaneId);
+            flight.setAirplane(airplane);
+        }
+    }
+
+    /**
+     * Update flight departure airport if provided
+     * Single Responsibility: Only handles departure airport update
+     */
+    private void updateFlightDepartureAirport(FlightModel flight, Integer departureAirportId) {
+        if (departureAirportId != null) {
+            AirportModel departureAirport = validateAndFetchDepartureAirport(departureAirportId);
+            flight.setDepartureAirport(departureAirport);
+        }
+    }
+
+    /**
+     * Update flight arrival airport if provided
+     * Single Responsibility: Only handles arrival airport update
+     */
+    private void updateFlightArrivalAirport(FlightModel flight, Integer arrivalAirportId) {
+        if (arrivalAirportId != null) {
+            AirportModel arrivalAirport = validateAndFetchArrivalAirport(arrivalAirportId);
+            flight.setArrivalAirport(arrivalAirport);
+        }
+    }
+
+    /**
+     * Update flight times if provided
+     * Single Responsibility: Only handles time updates
+     */
+    private void updateFlightTimes(FlightModel flight, Date departureTime, Date arrivalTime) {
+        if (departureTime != null) {
+            flight.setDepartureTime(departureTime);
+        }
+        
+        if (arrivalTime != null) {
+            flight.setArrivalTime(arrivalTime);
+        }
+    }
+
+    /**
+     * Update other flight fields if provided
+     * Single Responsibility: Only handles other field updates
+     */
+    private void updateFlightOtherFields(FlightModel flight, FlightUpdateRequest request) {
+        if (request.getBasePrice() != null) {
+            flight.setBasePrice(request.getBasePrice());
+        }
+        
+        if (request.getStatus() != null) {
+            flight.setStatus(request.getStatus());
+        }
+    }
+
+    /**
+     * Validate updated flight times
+     * Single Responsibility: Only handles time validation for existing flight
+     */
+    private void validateUpdatedFlightTimes(FlightModel flight) {
+        if (flight.getDepartureTime() != null && flight.getArrivalTime() != null) {
+            if (flight.getDepartureTime().after(flight.getArrivalTime())) {
+                throw new IllegalArgumentException("Departure time must be before arrival time");
+            }
+        }
+    }
+
+    // =========================== VALIDATION UTILITY METHODS ===========================
+
+    /**
+     * Validate flight exists by ID
+     * Single Responsibility: Only handles flight existence validation
+     */
+    private void validateFlightExists(Long flightId) {
+        if (!flightRepository.existsById(flightId)) {
+            throw new FlightNotFoundException("Flight not found with ID: " + flightId);
+        }
+    }
+
+    // =========================== SIDE EFFECTS HANDLING METHODS ===========================
+
+    /**
+     * Handle flight status change side effects
+     * Single Responsibility: Only handles side effects of status changes
+     */
+    private void handleFlightStatusChangeEffects(Long flightId, FlightStatus newStatus, FlightStatus oldStatus) {
+        if (newStatus == FlightStatus.CANCELED && oldStatus != FlightStatus.CANCELED) {
+            handleFlightCancellationEffects(flightId);
+        }
+    }
+
+    /**
+     * Handle flight cancellation side effects
+     * Single Responsibility: Only handles cancellation-specific side effects
+     */
+    private void handleFlightCancellationEffects(Long flightId) {
+        log.info("Flight {} has been canceled, handling related bookings and tickets", flightId);
+        
+        try {
+            ticketService.updateTicketStatusByFlight(flightId, TicketStatus.AVAILABLE);
+            log.info("Updated all tickets for flight {} to AVAILABLE status", flightId);
+            
+            log.info("Flight cancellation processing completed for flight {}", flightId);
+            
+        } catch (Exception e) {
+            log.error("Error processing flight cancellation for flight {}", flightId, e);
+        }
     }
 }
