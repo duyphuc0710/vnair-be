@@ -28,19 +28,12 @@ public class AirportServiceImpl implements AirportService {
     public AirportResponse createAirport(AirportCreateRequest request) {
         log.info("Creating airport with code: {}", request.getCode());
 
-        if (airportRepository.existsByCodeIgnoreCase(request.getCode())) {
-            throw new DuplicateAirportCodeException("Airport with code " + request.getCode() + " already exists");
-        }
-
-        AirportModel airport = new AirportModel();
-        airport.setCode(request.getCode());
-        airport.setName(request.getName());
-        airport.setCity(request.getCity());
-        airport.setCountry(request.getCountry());
-
+        validateAirportCodeUnique(request.getCode());
+        
+        AirportModel airport = createAirportEntity(request);
         AirportModel savedAirport = airportRepository.save(airport);
+        
         log.info("Successfully created airport with ID: {}", savedAirport.getId());
-
         return mapToResponse(savedAirport);
     }
 
@@ -48,25 +41,12 @@ public class AirportServiceImpl implements AirportService {
     public AirportResponse updateAirport(Integer id, AirportUpdateRequest request) {
         log.info("Updating airport with ID: {}", id);
 
-        AirportModel airport = airportRepository.findById(id)
-                .orElseThrow(() -> new AirportNotFoundException("Airport not found with ID: " + id));
-
-        if (request.getCode() != null && !request.getCode().equalsIgnoreCase(airport.getCode())) {
-            if (airportRepository.existsByCodeIgnoreCase(request.getCode())) {
-                throw new DuplicateAirportCodeException("Airport with code " + request.getCode() + " already exists");
-            }
-            airport.setCode(request.getCode());
+        AirportModel airport = validateAndFetchAirport(id);
+        
+        if (request.getCode() != null) {
+            validateAndUpdateAirportCode(airport, request.getCode());
         }
-
-        if (request.getName() != null) {
-            airport.setName(request.getName());
-        }
-        if (request.getCity() != null) {
-            airport.setCity(request.getCity());
-        }
-        if (request.getCountry() != null) {
-            airport.setCountry(request.getCountry());
-        }
+        updateAirportFields(airport, request);
 
         AirportModel savedAirport = airportRepository.save(airport);
         log.info("Successfully updated airport with ID: {}", savedAirport.getId());
@@ -79,9 +59,7 @@ public class AirportServiceImpl implements AirportService {
     public AirportResponse getAirportById(Integer id) {
         log.info("Getting airport by ID: {}", id);
 
-        AirportModel airport = airportRepository.findById(id)
-                .orElseThrow(() -> new AirportNotFoundException("Airport not found with ID: " + id));
-
+        AirportModel airport = validateAndFetchAirport(id);
         return mapToResponse(airport);
     }
 
@@ -98,12 +76,55 @@ public class AirportServiceImpl implements AirportService {
     public void deleteAirport(Integer id) {
         log.info("Deleting airport with ID: {}", id);
 
-        if (!airportRepository.existsById(id)) {
-            throw new AirportNotFoundException("Airport not found with ID: " + id);
-        }
-
-        airportRepository.deleteById(id);
+        AirportModel airport = validateAndFetchAirport(id);
+        airportRepository.delete(airport);
         log.info("Successfully deleted airport with ID: {}", id);
+    }
+
+    // =================== Helper Methods ===================
+
+    /**
+     * Helper methods for validation, entity creation/update, and data conversion
+     */
+
+    private void validateAirportCodeUnique(String code) {
+        if (airportRepository.existsByCodeIgnoreCase(code)) {
+            throw new DuplicateAirportCodeException("Airport code already exists: " + code);
+        }
+    }
+
+    private AirportModel createAirportEntity(AirportCreateRequest request) {
+        AirportModel airport = new AirportModel();
+        airport.setCode(request.getCode().toUpperCase().trim());
+        airport.setName(request.getName().trim());
+        airport.setCity(request.getCity().trim());
+        airport.setCountry(request.getCountry().trim());
+        return airport;
+    }
+
+    private AirportModel validateAndFetchAirport(Integer id) {
+        return airportRepository.findById(id)
+                .orElseThrow(() -> new AirportNotFoundException("Airport not found with ID: " + id));
+    }
+
+    private void validateAndUpdateAirportCode(AirportModel airport, String newCode) {
+        String trimmedCode = newCode.toUpperCase().trim();
+        if (!airport.getCode().equals(trimmedCode)) {
+            validateAirportCodeUnique(trimmedCode);
+            airport.setCode(trimmedCode);
+        }
+    }
+
+    private void updateAirportFields(AirportModel airport, AirportUpdateRequest request) {
+        if (request.getName() != null) {
+            airport.setName(request.getName().trim());
+        }
+        if (request.getCity() != null) {
+            airport.setCity(request.getCity().trim());
+        }
+        if (request.getCountry() != null) {
+            airport.setCountry(request.getCountry().trim());
+        }
     }
 
     private AirportResponse mapToResponse(AirportModel airport) {

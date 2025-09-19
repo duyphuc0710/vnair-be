@@ -39,35 +39,15 @@ public class TicketServiceImpl implements TicketService {
     public TicketResponse createTicket(TicketCreateRequest request) {
         log.info("Creating ticket for flight: {}", request.getFlightId());
 
-        // Validate flight exists
-        FlightModel flight = flightRepository.findById(request.getFlightId())
-                .orElseThrow(() -> new FlightNotFoundException("Flight not found with ID: " + request.getFlightId()));
+        // Validate and fetch entities
+        FlightModel flight = validateAndFetchFlight(request.getFlightId());
+        TicketTypeModel ticketType = validateAndFetchTicketType(request.getTicketTypeId());
 
-        // Validate ticket type exists
-        TicketTypeModel ticketType = ticketTypeRepository.findById(request.getTicketTypeId())
-                .orElseThrow(() -> new FlightNotFoundException(
-                        "TicketType not found with ID: " + request.getTicketTypeId()));
-
-        TicketModel ticket = new TicketModel();
-        ticket.setFlight(flight);
-        ticket.setTicketType(ticketType);
-        ticket.setSeatNumber(request.getSeatNumber());
-
-        // Set status from request or default to AVAILABLE
-        if (request.getStatus() != null) {
-            try {
-                TicketStatus status = TicketStatus.valueOf(request.getStatus().toUpperCase());
-                ticket.setStatus(status);
-            } catch (IllegalArgumentException e) {
-                ticket.setStatus(TicketStatus.AVAILABLE);
-            }
-        } else {
-            ticket.setStatus(TicketStatus.AVAILABLE);
-        }
-
+        // Create and save ticket entity
+        TicketModel ticket = createTicketEntity(flight, ticketType, request);
         TicketModel savedTicket = ticketRepository.save(ticket);
+        
         log.info("Successfully created ticket with ID: {}", savedTicket.getId());
-
         return mapToResponse(savedTicket);
     }
 
@@ -75,13 +55,9 @@ public class TicketServiceImpl implements TicketService {
     public TicketResponse updateTicket(Long id, TicketUpdateRequest request) {
         log.info("Updating ticket with ID: {}", id);
 
-        TicketModel ticket = ticketRepository.findById(id)
-                .orElseThrow(() -> new TicketNotFoundException("Ticket not found with ID: " + id));
-
-        if (request.getSeatNumber() != null) {
-            ticket.setSeatNumber(request.getSeatNumber());
-        }
-
+        TicketModel ticket = validateAndFetchTicket(id);
+        updateTicketFields(ticket, request);
+        
         TicketModel savedTicket = ticketRepository.save(ticket);
         log.info("Successfully updated ticket with ID: {}", savedTicket.getId());
 
@@ -93,9 +69,7 @@ public class TicketServiceImpl implements TicketService {
     public TicketResponse getTicketById(Long id) {
         log.info("Getting ticket by ID: {}", id);
 
-        TicketModel ticket = ticketRepository.findById(id)
-                .orElseThrow(() -> new TicketNotFoundException("Ticket not found with ID: " + id));
-
+        TicketModel ticket = validateAndFetchTicket(id);
         return mapToResponse(ticket);
     }
 
@@ -112,10 +86,7 @@ public class TicketServiceImpl implements TicketService {
     public void deleteTicket(Long id) {
         log.info("Deleting ticket with ID: {}", id);
 
-        if (!ticketRepository.existsById(id)) {
-            throw new TicketNotFoundException("Ticket not found with ID: " + id);
-        }
-
+        validateTicketExists(id);
         ticketRepository.deleteById(id);
         log.info("Successfully deleted ticket with ID: {}", id);
     }
@@ -129,24 +100,16 @@ public class TicketServiceImpl implements TicketService {
     public List<TicketResponse> getTicketsByFlightForCustomer(Long flightId) {
         log.info("Getting AVAILABLE tickets for flight: {} (Customer view)", flightId);
 
-        // Get available tickets for customer
-        Page<TicketModel> availableTickets = ticketRepository.findByStatus(TicketStatus.AVAILABLE, Pageable.unpaged());
-        return availableTickets.getContent().stream()
-                .filter(ticket -> ticket.getFlight() != null && ticket.getFlight().getId().equals(flightId))
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
+        List<TicketModel> availableTickets = getTicketsByFlightAndStatus(flightId, TicketStatus.AVAILABLE);
+        return convertListToResponses(availableTickets);
     }
 
     @Transactional(readOnly = true)
     public List<TicketResponse> getTicketsByFlightForManager(Long flightId) {
         log.info("Getting ALL tickets for flight: {} (Manager view)", flightId);
 
-        // Manager sees all tickets regardless of status
-        List<TicketModel> allTickets = ticketRepository.findAll();
-        return allTickets.stream()
-                .filter(ticket -> ticket.getFlight() != null && ticket.getFlight().getId().equals(flightId))
-                .map(this::mapToResponse)
-                .collect(Collectors.toList());
+        List<TicketModel> allTickets = getTicketsByFlight(flightId);
+        return convertListToResponses(allTickets);
     }
 
     @Override
@@ -166,15 +129,13 @@ public class TicketServiceImpl implements TicketService {
     public TicketResponse updateTicketStatus(Long id, TicketStatus status) {
         log.info("Updating ticket status for ID: {} to {}", id, status);
 
-        TicketModel ticket = ticketRepository.findById(id)
-                .orElseThrow(() -> new TicketNotFoundException("Ticket not found with ID: " + id));
-
+        TicketModel ticket = validateAndFetchTicket(id);
         TicketStatus oldStatus = ticket.getStatus();
+        
         ticket.setStatus(status);
-
         TicketModel savedTicket = ticketRepository.save(ticket);
+        
         log.info("Updated ticket {} status from {} to {}", id, oldStatus, status);
-
         return mapToResponse(savedTicket);
     }
 
@@ -196,12 +157,8 @@ public class TicketServiceImpl implements TicketService {
     public Boolean validateTicketForCheckIn(Long id) {
         log.info("Validating ticket for check-in: {}", id);
 
-        TicketModel ticket = ticketRepository.findById(id)
-                .orElseThrow(() -> new TicketNotFoundException("Ticket not found with ID: " + id));
-
-        return ticket.getStatus() == TicketStatus.PAID &&
-                ticket.getFlight() != null &&
-                ticket.getFlight().getDepartureTime().after(new java.util.Date());
+        TicketModel ticket = validateAndFetchTicket(id);
+        return isTicketValidForCheckIn(ticket);
     }
 
     /**
@@ -223,39 +180,15 @@ public class TicketServiceImpl implements TicketService {
     public void generateTicketsForFlight(Long flightId) {
         log.info("Generating tickets for flight ID: {}", flightId);
 
-        // Get flight information
-        FlightModel flight = flightRepository.findById(flightId)
-                .orElseThrow(() -> new RuntimeException("Flight not found with ID: " + flightId));
-
-        // Get all available ticket types
-        List<TicketTypeModel> ticketTypes = ticketTypeRepository.findAll();
-        if (ticketTypes.isEmpty()) {
-            log.warn("No ticket types found, cannot generate tickets");
-            return;
-        }
-
-        // Get airplane seat capacity
-        Integer seatCapacity = flight.getAirplane().getSeatCapacity();
-        if (seatCapacity == null || seatCapacity <= 0) {
-            log.warn("Invalid seat capacity for airplane, cannot generate tickets");
-            return;
-        }
-
-        List<TicketModel> ticketsToCreate = new ArrayList<>();
-
-        // Generate tickets for each seat and each ticket type
-        for (int seatNumber = 1; seatNumber <= seatCapacity; seatNumber++) {
-            for (TicketTypeModel ticketType : ticketTypes) {
-                TicketModel ticket = new TicketModel();
-                ticket.setFlight(flight);
-                ticket.setTicketType(ticketType);
-                ticket.setSeatNumber(String.format("%03d", seatNumber)); // Format as "001", "002", etc.
-                ticket.setStatus(TicketStatus.AVAILABLE);
-
-                ticketsToCreate.add(ticket);
-            }
-        }
-
+        // Validate and fetch flight
+        FlightModel flight = validateAndFetchFlight(flightId);
+        
+        // Validate prerequisites for ticket generation
+        validateTicketGenerationPrerequisites(flight);
+        
+        // Generate tickets
+        List<TicketModel> ticketsToCreate = createTicketsForFlight(flight);
+        
         // Save all tickets in batch
         ticketRepository.saveAll(ticketsToCreate);
         log.info("Successfully generated {} tickets for flight ID: {}", ticketsToCreate.size(), flightId);
@@ -286,5 +219,113 @@ public class TicketServiceImpl implements TicketService {
                 .createdAt(ticket.getCreatedAt())
                 .updatedAt(ticket.getUpdatedAt())
                 .build();
+    }
+
+    // =========================== HELPER METHODS ===========================
+    // Entity fetching, validation, creation, updates, business logic utilities
+
+    private FlightModel validateAndFetchFlight(Long flightId) {
+        return flightRepository.findById(flightId)
+                .orElseThrow(() -> new FlightNotFoundException("Flight not found with ID: " + flightId));
+    }
+
+    private TicketTypeModel validateAndFetchTicketType(Integer ticketTypeId) {
+        return ticketTypeRepository.findById(ticketTypeId)
+                .orElseThrow(() -> new FlightNotFoundException("TicketType not found with ID: " + ticketTypeId));
+    }
+
+    private TicketModel validateAndFetchTicket(Long ticketId) {
+        return ticketRepository.findById(ticketId)
+                .orElseThrow(() -> new TicketNotFoundException("Ticket not found with ID: " + ticketId));
+    }
+
+    private void validateTicketExists(Long ticketId) {
+        if (!ticketRepository.existsById(ticketId)) {
+            throw new TicketNotFoundException("Ticket not found with ID: " + ticketId);
+        }
+    }
+
+    private TicketModel createTicketEntity(FlightModel flight, TicketTypeModel ticketType, TicketCreateRequest request) {
+        TicketModel ticket = new TicketModel();
+        ticket.setFlight(flight);
+        ticket.setTicketType(ticketType);
+        ticket.setSeatNumber(request.getSeatNumber());
+        ticket.setStatus(parseTicketStatus(request.getStatus()));
+        return ticket;
+    }
+
+    private TicketStatus parseTicketStatus(String statusString) {
+        if (statusString != null) {
+            try {
+                return TicketStatus.valueOf(statusString.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                return TicketStatus.AVAILABLE;
+            }
+        }
+        return TicketStatus.AVAILABLE;
+    }
+
+    private void updateTicketFields(TicketModel ticket, TicketUpdateRequest request) {
+        if (request.getSeatNumber() != null) {
+            ticket.setSeatNumber(request.getSeatNumber());
+        }
+    }
+
+    private List<TicketModel> getTicketsByFlightAndStatus(Long flightId, TicketStatus status) {
+        Page<TicketModel> ticketsPage = ticketRepository.findByStatus(status, Pageable.unpaged());
+        return ticketsPage.getContent().stream()
+                .filter(ticket -> ticket.getFlight() != null && ticket.getFlight().getId().equals(flightId))
+                .collect(Collectors.toList());
+    }
+
+    private List<TicketModel> getTicketsByFlight(Long flightId) {
+        return ticketRepository.findAll().stream()
+                .filter(ticket -> ticket.getFlight() != null && ticket.getFlight().getId().equals(flightId))
+                .collect(Collectors.toList());
+    }
+
+    private Boolean isTicketValidForCheckIn(TicketModel ticket) {
+        return ticket.getStatus() == TicketStatus.PAID &&
+                ticket.getFlight() != null &&
+                ticket.getFlight().getDepartureTime().after(new java.util.Date());
+    }
+
+    private void validateTicketGenerationPrerequisites(FlightModel flight) {
+        List<TicketTypeModel> ticketTypes = ticketTypeRepository.findAll();
+        if (ticketTypes.isEmpty()) {
+            log.warn("No ticket types found, cannot generate tickets");
+            throw new RuntimeException("No ticket types available");
+        }
+
+        Integer seatCapacity = flight.getAirplane().getSeatCapacity();
+        if (seatCapacity == null || seatCapacity <= 0) {
+            log.warn("Invalid seat capacity for airplane, cannot generate tickets");
+            throw new RuntimeException("Invalid seat capacity");
+        }
+    }
+
+    private List<TicketModel> createTicketsForFlight(FlightModel flight) {
+        List<TicketTypeModel> ticketTypes = ticketTypeRepository.findAll();
+        Integer seatCapacity = flight.getAirplane().getSeatCapacity();
+        List<TicketModel> ticketsToCreate = new ArrayList<>();
+
+        for (int seatNumber = 1; seatNumber <= seatCapacity; seatNumber++) {
+            for (TicketTypeModel ticketType : ticketTypes) {
+                TicketModel ticket = new TicketModel();
+                ticket.setFlight(flight);
+                ticket.setTicketType(ticketType);
+                ticket.setSeatNumber(String.format("%03d", seatNumber));
+                ticket.setStatus(TicketStatus.AVAILABLE);
+                ticketsToCreate.add(ticket);
+            }
+        }
+
+        return ticketsToCreate;
+    }
+
+    private List<TicketResponse> convertListToResponses(List<TicketModel> tickets) {
+        return tickets.stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
     }
 }

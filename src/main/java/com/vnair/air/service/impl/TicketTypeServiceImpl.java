@@ -28,13 +28,10 @@ public class TicketTypeServiceImpl implements TicketTypeService {
     public TicketTypeResponse createTicketType(TicketTypeCreateRequest request) {
         log.info("Creating ticket type: {}", request.getName());
         
-        TicketTypeModel ticketType = new TicketTypeModel();
-        ticketType.setName(request.getName());
-        ticketType.setPriceMultiplier(request.getPriceMultiplier());
-        
+        TicketTypeModel ticketType = createTicketTypeEntity(request);
         TicketTypeModel savedTicketType = ticketTypeRepository.save(ticketType);
-        log.info("Successfully created ticket type with ID: {}", savedTicketType.getId());
         
+        log.info("Successfully created ticket type with ID: {}", savedTicketType.getId());
         return mapToResponse(savedTicketType);
     }
 
@@ -42,15 +39,8 @@ public class TicketTypeServiceImpl implements TicketTypeService {
     public TicketTypeResponse updateTicketType(Integer id, TicketTypeUpdateRequest request) {
         log.info("Updating ticket type with ID: {}", id);
         
-        TicketTypeModel ticketType = ticketTypeRepository.findById(id)
-                .orElseThrow(() -> new TicketTypeNotFoundException("TicketType not found with ID: " + id));
-        
-        if (request.getName() != null) {
-            ticketType.setName(request.getName());
-        }
-        if (request.getPriceMultiplier() != null) {
-            ticketType.setPriceMultiplier(request.getPriceMultiplier());
-        }
+        TicketTypeModel ticketType = validateAndFetchTicketType(id);
+        updateTicketTypeFields(ticketType, request);
         
         TicketTypeModel savedTicketType = ticketTypeRepository.save(ticketType);
         log.info("Successfully updated ticket type with ID: {}", savedTicketType.getId());
@@ -63,9 +53,7 @@ public class TicketTypeServiceImpl implements TicketTypeService {
     public TicketTypeResponse getTicketTypeById(Integer id) {
         log.info("Getting ticket type by ID: {}", id);
         
-        TicketTypeModel ticketType = ticketTypeRepository.findById(id)
-                .orElseThrow(() -> new TicketTypeNotFoundException("TicketType not found with ID: " + id));
-        
+        TicketTypeModel ticketType = validateAndFetchTicketType(id);
         return mapToResponse(ticketType);
     }
 
@@ -82,10 +70,7 @@ public class TicketTypeServiceImpl implements TicketTypeService {
     public void deleteTicketType(Integer id) {
         log.info("Deleting ticket type with ID: {}", id);
         
-        if (!ticketTypeRepository.existsById(id)) {
-            throw new TicketTypeNotFoundException("TicketType not found with ID: " + id);
-        }
-        
+        validateTicketTypeExists(id);
         ticketTypeRepository.deleteById(id);
         log.info("Successfully deleted ticket type with ID: {}", id);
     }
@@ -116,5 +101,35 @@ public class TicketTypeServiceImpl implements TicketTypeService {
                 .createdAt(ticketType.getCreatedAt())
                 .updatedAt(ticketType.getUpdatedAt())
                 .build();
+    }
+
+    // =========================== HELPER METHODS ===========================
+    // Entity fetching, validation, creation, updates
+
+    private TicketTypeModel validateAndFetchTicketType(Integer id) {
+        return ticketTypeRepository.findById(id)
+                .orElseThrow(() -> new TicketTypeNotFoundException("TicketType not found with ID: " + id));
+    }
+
+    private void validateTicketTypeExists(Integer id) {
+        if (!ticketTypeRepository.existsById(id)) {
+            throw new TicketTypeNotFoundException("TicketType not found with ID: " + id);
+        }
+    }
+
+    private TicketTypeModel createTicketTypeEntity(TicketTypeCreateRequest request) {
+        TicketTypeModel ticketType = new TicketTypeModel();
+        ticketType.setName(request.getName());
+        ticketType.setPriceMultiplier(request.getPriceMultiplier());
+        return ticketType;
+    }
+
+    private void updateTicketTypeFields(TicketTypeModel ticketType, TicketTypeUpdateRequest request) {
+        if (request.getName() != null) {
+            ticketType.setName(request.getName());
+        }
+        if (request.getPriceMultiplier() != null) {
+            ticketType.setPriceMultiplier(request.getPriceMultiplier());
+        }
     }
 }
