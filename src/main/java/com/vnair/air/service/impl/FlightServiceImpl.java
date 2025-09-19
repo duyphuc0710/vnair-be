@@ -221,58 +221,35 @@ public class FlightServiceImpl implements FlightService {
                 .build();
     }
 
-    // =========================== UTILITY METHODS ===========================
+    // =========================== HELPER METHODS ===========================
+    // Entity fetching, validation, creation, updates, side effects handling
 
-    /**
-     * Validate and fetch airplane by ID
-     * Single Responsibility: Only handles airplane validation and fetching
-     */
     private AirplaneModel validateAndFetchAirplane(Integer airplaneId) {
         return airplaneRepository.findById(airplaneId)
                 .orElseThrow(() -> new AirplaneNotFoundException("Airplane not found with ID: " + airplaneId));
     }
 
-    /**
-     * Validate and fetch departure airport by ID
-     * Single Responsibility: Only handles departure airport validation and fetching
-     */
     private AirportModel validateAndFetchDepartureAirport(Integer departureAirportId) {
         return airportRepository.findById(departureAirportId)
                 .orElseThrow(() -> new AirportNotFoundException("Departure airport not found with ID: " + departureAirportId));
     }
 
-    /**
-     * Validate and fetch arrival airport by ID
-     * Single Responsibility: Only handles arrival airport validation and fetching
-     */
     private AirportModel validateAndFetchArrivalAirport(Integer arrivalAirportId) {
         return airportRepository.findById(arrivalAirportId)
                 .orElseThrow(() -> new AirportNotFoundException("Arrival airport not found with ID: " + arrivalAirportId));
     }
 
-    /**
-     * Validate and fetch flight by ID
-     * Single Responsibility: Only handles flight validation and fetching
-     */
     private FlightModel validateAndFetchFlight(Long flightId) {
         return flightRepository.findById(flightId)
                 .orElseThrow(() -> new FlightNotFoundException("Flight not found with ID: " + flightId));
     }
 
-    /**
-     * Validate flight departure and arrival times
-     * Single Responsibility: Only handles time validation logic
-     */
     private void validateFlightTimes(Date departureTime, Date arrivalTime) {
         if (departureTime.after(arrivalTime)) {
             throw new IllegalArgumentException("Departure time must be before arrival time");
         }
     }
 
-    /**
-     * Create flight entity from request and validated entities
-     * Single Responsibility: Only handles flight entity creation
-     */
     private FlightModel createFlightEntity(AirplaneModel airplane, AirportModel departureAirport, 
                                          AirportModel arrivalAirport, FlightCreateRequest request) {
         FlightModel flight = new FlightModel();
@@ -286,26 +263,15 @@ public class FlightServiceImpl implements FlightService {
         return flight;
     }
 
-    /**
-     * Handle ticket generation for new flight
-     * Single Responsibility: Only handles ticket generation side effect
-     */
     private void handleTicketGenerationForNewFlight(Long flightId) {
         try {
             ticketService.generateTicketsForFlight(flightId);
             log.info("Successfully generated tickets for flight ID: {}", flightId);
         } catch (Exception e) {
             log.error("Failed to generate tickets for flight ID: {}", flightId, e);
-            // Continue without failing the flight creation
         }
     }
 
-    // =========================== UPDATE FLIGHT UTILITY METHODS ===========================
-
-    /**
-     * Update flight airplane if provided
-     * Single Responsibility: Only handles airplane update
-     */
     private void updateFlightAirplane(FlightModel flight, Integer airplaneId) {
         if (airplaneId != null) {
             AirplaneModel airplane = validateAndFetchAirplane(airplaneId);
@@ -313,10 +279,6 @@ public class FlightServiceImpl implements FlightService {
         }
     }
 
-    /**
-     * Update flight departure airport if provided
-     * Single Responsibility: Only handles departure airport update
-     */
     private void updateFlightDepartureAirport(FlightModel flight, Integer departureAirportId) {
         if (departureAirportId != null) {
             AirportModel departureAirport = validateAndFetchDepartureAirport(departureAirportId);
@@ -324,10 +286,6 @@ public class FlightServiceImpl implements FlightService {
         }
     }
 
-    /**
-     * Update flight arrival airport if provided
-     * Single Responsibility: Only handles arrival airport update
-     */
     private void updateFlightArrivalAirport(FlightModel flight, Integer arrivalAirportId) {
         if (arrivalAirportId != null) {
             AirportModel arrivalAirport = validateAndFetchArrivalAirport(arrivalAirportId);
@@ -335,10 +293,6 @@ public class FlightServiceImpl implements FlightService {
         }
     }
 
-    /**
-     * Update flight times if provided
-     * Single Responsibility: Only handles time updates
-     */
     private void updateFlightTimes(FlightModel flight, Date departureTime, Date arrivalTime) {
         if (departureTime != null) {
             flight.setDepartureTime(departureTime);
@@ -349,10 +303,6 @@ public class FlightServiceImpl implements FlightService {
         }
     }
 
-    /**
-     * Update other flight fields if provided
-     * Single Responsibility: Only handles other field updates
-     */
     private void updateFlightOtherFields(FlightModel flight, FlightUpdateRequest request) {
         if (request.getBasePrice() != null) {
             flight.setBasePrice(request.getBasePrice());
@@ -363,10 +313,6 @@ public class FlightServiceImpl implements FlightService {
         }
     }
 
-    /**
-     * Validate updated flight times
-     * Single Responsibility: Only handles time validation for existing flight
-     */
     private void validateUpdatedFlightTimes(FlightModel flight) {
         if (flight.getDepartureTime() != null && flight.getArrivalTime() != null) {
             if (flight.getDepartureTime().after(flight.getArrivalTime())) {
@@ -375,43 +321,25 @@ public class FlightServiceImpl implements FlightService {
         }
     }
 
-    // =========================== VALIDATION UTILITY METHODS ===========================
-
-    /**
-     * Validate flight exists by ID
-     * Single Responsibility: Only handles flight existence validation
-     */
     private void validateFlightExists(Long flightId) {
         if (!flightRepository.existsById(flightId)) {
             throw new FlightNotFoundException("Flight not found with ID: " + flightId);
         }
     }
 
-    // =========================== SIDE EFFECTS HANDLING METHODS ===========================
-
-    /**
-     * Handle flight status change side effects
-     * Single Responsibility: Only handles side effects of status changes
-     */
     private void handleFlightStatusChangeEffects(Long flightId, FlightStatus newStatus, FlightStatus oldStatus) {
         if (newStatus == FlightStatus.CANCELED && oldStatus != FlightStatus.CANCELED) {
             handleFlightCancellationEffects(flightId);
         }
     }
 
-    /**
-     * Handle flight cancellation side effects
-     * Single Responsibility: Only handles cancellation-specific side effects
-     */
     private void handleFlightCancellationEffects(Long flightId) {
         log.info("Flight {} has been canceled, handling related bookings and tickets", flightId);
         
         try {
             ticketService.updateTicketStatusByFlight(flightId, TicketStatus.AVAILABLE);
             log.info("Updated all tickets for flight {} to AVAILABLE status", flightId);
-            
             log.info("Flight cancellation processing completed for flight {}", flightId);
-            
         } catch (Exception e) {
             log.error("Error processing flight cancellation for flight {}", flightId, e);
         }

@@ -45,59 +45,40 @@ public class PaymentServiceImpl implements PaymentService {
     @Override
     @Transactional
     public PaymentResponse createPayment(PaymentCreateRequest request) {
-        BookingModel booking = bookingRepository.findById(request.getBookingId())
-                .orElseThrow(
-                        () -> new BookingNotFoundException("Booking not found with id: " + request.getBookingId()));
-
-        if (booking.getStatus() == BookingStatus.CONFIRMED) {
-            throw new BookingNotFoundException("Booking CONFIRMED");
-        }
-        if (booking.getStatus() == BookingStatus.CANCELED) {
-            throw new BookingNotFoundException("Booking CANCELED");
-        }
-
-        // Create payment
-        PaymentModel payment = new PaymentModel();
-        payment.setBooking(booking);
-        payment.setAmount(booking.getTotalAmount());
-        payment.setMethod(PaymentMethod.valueOf(request.getMethod()));
-        payment.setStatus(PaymentStatus.SUCCESS);
-        payment.setPaidAt(new Date());
-
-        payment = paymentRepository.save(payment);
-        payment.setTransactionId(generateTransactionId());
-
-        booking.setStatus(BookingStatus.CONFIRMED);
-        bookingRepository.save(booking);
-
-        payment = paymentRepository.save(payment);
-        return convertToResponse(payment);
+        // Validate and fetch booking
+        BookingModel booking = validateAndFetchBookingForPayment(request.getBookingId());
+        
+        // Validate booking status
+        validateBookingStatusForPayment(booking);
+        
+        // Create and save payment entity
+        PaymentModel payment = createPaymentEntity(booking, request);
+        PaymentModel savedPayment = paymentRepository.save(payment);
+        
+        // Generate transaction ID and update payment
+        savedPayment.setTransactionId(generateTransactionId());
+        
+        // Handle payment success side effects
+        handlePaymentSuccessEffects(booking, savedPayment);
+        
+        return convertToResponse(savedPayment);
     }
 
     @Override
     @Transactional
     public PaymentResponse updatePayment(Long id, PaymentUpdateRequest request) {
-        PaymentModel payment = paymentRepository.findById(id)
-                .orElseThrow(() -> new PaymentNotFoundException("Payment not found with id: " + id));
-
-        if (request.getAmount() != null) {
-            payment.setAmount(request.getAmount());
-        }
-
-        if (request.getMethod() != null) {
-            payment.setMethod(request.getMethod());
-        }
-
-        payment = paymentRepository.save(payment);
-        return convertToResponse(payment);
+        PaymentModel payment = validateAndFetchPayment(id);
+        
+        updatePaymentFields(payment, request);
+        
+        PaymentModel savedPayment = paymentRepository.save(payment);
+        return convertToResponse(savedPayment);
     }
 
     @Override
     @Transactional(readOnly = true)
     public PaymentResponse getPaymentById(Long id) {
-        PaymentModel payment = paymentRepository.findById(id)
-                .orElseThrow(() -> new PaymentNotFoundException("Payment not found with id: " + id));
-
+        PaymentModel payment = validateAndFetchPayment(id);
         return convertToResponse(payment);
     }
 
@@ -105,93 +86,44 @@ public class PaymentServiceImpl implements PaymentService {
     @Transactional(readOnly = true)
     public Page<PaymentResponse> getAllPayments(Pageable pageable) {
         Page<PaymentModel> paymentPage = paymentRepository.findAll(pageable);
-        List<PaymentResponse> responses = paymentPage.getContent().stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
-
-        return new PageImpl<>(responses, pageable, paymentPage.getTotalElements());
+        return convertPageToResponses(paymentPage, pageable);
     }
 
     @Override
     @Transactional
     public void deletePayment(Long id) {
-        PaymentModel payment = paymentRepository.findById(id)
-                .orElseThrow(() -> new PaymentNotFoundException("Payment not found with id: " + id));
-
-        if (payment.getStatus() == PaymentStatus.SUCCESS) {
-            BookingModel booking = payment.getBooking();
-            List<BookingTicketModel> bookingTickets = booking.getBookingTickets();
-            for (BookingTicketModel bookingTicket : bookingTickets) {
-                TicketModel ticket = bookingTicket.getTicket();
-                ticket.setStatus(TicketStatus.BOOKED);
-                ticketRepository.save(ticket);
-            }
-        }
-
+        PaymentModel payment = validateAndFetchPayment(id);
+        
+        // Handle deletion side effects if payment was successful
+        handlePaymentDeletionEffects(payment);
+        
         paymentRepository.delete(payment);
     }
 
     @Override
     public List<PaymentResponse> getPaymentsByBooking(Long bookingId) {
         List<PaymentModel> payments = paymentRepository.findByBookingId(bookingId);
-        return payments.stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
+        return convertListToResponses(payments);
     }
 
     @Override
     public List<PaymentResponse> getPaymentsByUsername(String username) {
-        UserEntity user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with username: " + username));
-        
-        List<BookingModel> userBookings = bookingRepository.findByUserId(user.getId());
-        
-        List<Long> bookingIds = userBookings.stream()
-                .map(BookingModel::getId)
-                .collect(Collectors.toList());
-        
-        if (bookingIds.isEmpty()) {
-            return List.of();
-        }
-        
-        List<PaymentModel> payments = paymentRepository.findByBookingIdIn(bookingIds);
-        
-        return payments.stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
+        UserEntity user = validateAndFetchUserByUsername(username);
+        List<PaymentModel> payments = getPaymentsByUser(user);
+        return convertListToResponses(payments);
     }
 
     @Override
     public List<PaymentResponse> getPaymentsByUserId(String username) {
-        UserEntity user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with username: " + username));
-        
-        Long userId = user.getId();
-        
-        List<BookingModel> userBookings = bookingRepository.findByUserId(userId);
-        
-        List<Long> bookingIds = userBookings.stream()
-                .map(BookingModel::getId)
-                .collect(Collectors.toList());
-        
-        if (bookingIds.isEmpty()) {
-            return List.of();
-        }
-        
-        List<PaymentModel> payments = paymentRepository.findByBookingIdIn(bookingIds);
-        
-        return payments.stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
+        UserEntity user = validateAndFetchUserByUsername(username);
+        List<PaymentModel> payments = getPaymentsByUser(user);
+        return convertListToResponses(payments);
     }
 
     @Override
     public Page<PaymentResponse> getPaymentsByStatus(PaymentStatus status, Pageable pageable) {
         Page<PaymentModel> paymentPage = paymentRepository.findByStatus(status, pageable);
-        List<PaymentResponse> responses = paymentPage.getContent().stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
-        return new PageImpl<>(responses, pageable, paymentPage.getTotalElements());
+        return convertPageToResponses(paymentPage, pageable);
     }
 
     @Override
@@ -210,19 +142,16 @@ public class PaymentServiceImpl implements PaymentService {
     @Override
     public List<PaymentResponse> findPaymentsByTransactionId(String transactionId) {
         List<PaymentModel> payments = paymentRepository.findByTransactionId(transactionId);
-        return payments.stream()
-                .map(this::convertToResponse)
-                .toList();
+        return convertListToResponses(payments);
     }
 
     @Override
     public PaymentResponse updatePaymentStatus(Long id, PaymentStatus status) {
-        PaymentModel payment = paymentRepository.findById(id)
-                .orElseThrow(() -> new PaymentNotFoundException("Payment not found with id: " + id));
-
+        PaymentModel payment = validateAndFetchPayment(id);
+        
         payment.setStatus(status);
-        payment = paymentRepository.save(payment);
-        return convertToResponse(payment);
+        PaymentModel savedPayment = paymentRepository.save(payment);
+        return convertToResponse(savedPayment);
     }
 
     @Override
@@ -249,6 +178,96 @@ public class PaymentServiceImpl implements PaymentService {
                 .createdAt(payment.getCreatedAt())
                 .updatedAt(payment.getUpdatedAt())
                 .build();
+    }
+
+    // =========================== HELPER METHODS ===========================
+    // Entity fetching, validation, creation, updates, side effects, conversion utilities
+
+    private BookingModel validateAndFetchBookingForPayment(Long bookingId) {
+        return bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new BookingNotFoundException("Booking not found with id: " + bookingId));
+    }
+
+    private PaymentModel validateAndFetchPayment(Long paymentId) {
+        return paymentRepository.findById(paymentId)
+                .orElseThrow(() -> new PaymentNotFoundException("Payment not found with id: " + paymentId));
+    }
+
+    private UserEntity validateAndFetchUserByUsername(String username) {
+        return userRepository.findByUsername(username)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with username: " + username));
+    }
+
+    private void validateBookingStatusForPayment(BookingModel booking) {
+        if (booking.getStatus() == BookingStatus.CONFIRMED) {
+            throw new BookingNotFoundException("Booking already CONFIRMED");
+        }
+        if (booking.getStatus() == BookingStatus.CANCELED) {
+            throw new BookingNotFoundException("Booking is CANCELED");
+        }
+    }
+
+    private PaymentModel createPaymentEntity(BookingModel booking, PaymentCreateRequest request) {
+        PaymentModel payment = new PaymentModel();
+        payment.setBooking(booking);
+        payment.setAmount(booking.getTotalAmount());
+        payment.setMethod(PaymentMethod.valueOf(request.getMethod()));
+        payment.setStatus(PaymentStatus.SUCCESS);
+        payment.setPaidAt(new Date());
+        return payment;
+    }
+
+    private void updatePaymentFields(PaymentModel payment, PaymentUpdateRequest request) {
+        if (request.getAmount() != null) {
+            payment.setAmount(request.getAmount());
+        }
+
+        if (request.getMethod() != null) {
+            payment.setMethod(request.getMethod());
+        }
+    }
+
+    private void handlePaymentSuccessEffects(BookingModel booking, PaymentModel payment) {
+        booking.setStatus(BookingStatus.CONFIRMED);
+        bookingRepository.save(booking);
+        paymentRepository.save(payment);
+    }
+
+    private void handlePaymentDeletionEffects(PaymentModel payment) {
+        if (payment.getStatus() == PaymentStatus.SUCCESS) {
+            BookingModel booking = payment.getBooking();
+            List<BookingTicketModel> bookingTickets = booking.getBookingTickets();
+            for (BookingTicketModel bookingTicket : bookingTickets) {
+                TicketModel ticket = bookingTicket.getTicket();
+                ticket.setStatus(TicketStatus.BOOKED);
+                ticketRepository.save(ticket);
+            }
+        }
+    }
+
+    private List<PaymentModel> getPaymentsByUser(UserEntity user) {
+        List<BookingModel> userBookings = bookingRepository.findByUserId(user.getId());
+        
+        List<Long> bookingIds = userBookings.stream()
+                .map(BookingModel::getId)
+                .collect(Collectors.toList());
+        
+        if (bookingIds.isEmpty()) {
+            return List.of();
+        }
+        
+        return paymentRepository.findByBookingIdIn(bookingIds);
+    }
+
+    private List<PaymentResponse> convertListToResponses(List<PaymentModel> payments) {
+        return payments.stream()
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
+    }
+
+    private Page<PaymentResponse> convertPageToResponses(Page<PaymentModel> paymentPage, Pageable pageable) {
+        List<PaymentResponse> responses = convertListToResponses(paymentPage.getContent());
+        return new PageImpl<>(responses, pageable, paymentPage.getTotalElements());
     }
 
 }
