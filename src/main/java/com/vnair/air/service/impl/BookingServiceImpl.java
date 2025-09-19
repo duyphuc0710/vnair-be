@@ -45,48 +45,18 @@ public class BookingServiceImpl implements BookingService {
     @Override
     @Transactional
     public BookingResponse createBooking(BookingCreateRequest request) {
-        
-        UserEntity user = userRepository.findById(request.getUserId())
-                .orElseThrow(() -> new ResourceNotFoundException("User ", "id", request.getUserId()));
+        // Validate input and fetch entities
+        UserEntity user = validateAndFetchUser(request.getUserId());
+        List<TicketModel> tickets = validateAndFetchTickets(request.getTicketIds());
 
-        List<TicketModel> tickets = ticketRepository.findAllById(request.getTicketIds());
-
-        if (tickets.size() != request.getTicketIds().size()) {
-            throw new TicketNotAvailableException("Some tickets not found");
-        }
-
-        List<TicketModel> unavailableTickets = tickets.stream()
-                .filter(ticket -> ticket.getStatus() != TicketStatus.AVAILABLE)
-                .collect(Collectors.toList());
-
-        if (!unavailableTickets.isEmpty()) {
-            throw new TicketNotAvailableException(
-                    "Tickets are not available: " +
-                            unavailableTickets.stream()
-                                    .map(t -> t.getId().toString())
-                                    .collect(Collectors.joining(", ")));
-        }
-
+        // Calculate total amount
         BigDecimal totalAmount = calculateBookingTotalFromTickets(tickets);
 
-        BookingModel booking = new BookingModel();
-        booking.setUser(user);
-        booking.setBookingDate(request.getBookingDate() != null ? request.getBookingDate() : new Date());
-        booking.setTotalAmount(totalAmount);
-        booking.setStatus(request.getStatus() != null ? request.getStatus() : BookingStatus.PENDING);
+        // Create and save booking entity
+        BookingModel booking = createAndSaveBooking(user, request, totalAmount);
 
-        booking = bookingRepository.save(booking);
-
-        for (TicketModel ticket : tickets) {
-            ticket.setStatus(TicketStatus.BOOKED);
-            ticketRepository.save(ticket);
-
-            BookingTicketModel bookingTicket = new BookingTicketModel();
-            bookingTicket.setBooking(booking);
-            bookingTicket.setTicket(ticket);
-
-            bookingTicketRepository.save(bookingTicket);
-        }
+        // Update tickets and create booking-ticket associations
+        createBookingTicketAssociations(booking, tickets);
 
         return convertToResponse(booking);
     }
@@ -118,9 +88,7 @@ public class BookingServiceImpl implements BookingService {
     @Override
     @Transactional(readOnly = true)
     public BookingResponse getBookingById(Long id) {
-        BookingModel booking = bookingRepository.findById(id)
-                .orElseThrow(() -> new BookingNotFoundException("Booking not found with id: " + id));
-
+        BookingModel booking = validateAndFetchBooking(id);
         return convertToResponse(booking);
     }
 
@@ -128,28 +96,14 @@ public class BookingServiceImpl implements BookingService {
     @Transactional(readOnly = true)
     public Page<BookingResponse> getAllBookings(Pageable pageable) {
         Page<BookingModel> bookingPage = bookingRepository.findAll(pageable);
-        List<BookingResponse> responses = bookingPage.getContent().stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
-
-        return new PageImpl<>(responses, pageable, bookingPage.getTotalElements());
+        return convertPageToResponses(bookingPage, pageable);
     }
 
     @Override
     @Transactional
     public void deleteBooking(Long id) {
-        BookingModel booking = bookingRepository.findById(id)
-                .orElseThrow(() -> new BookingNotFoundException("Booking not found with id: " + id));
-
-        // Release all tickets back to AVAILABLE status
-        List<BookingTicketModel> bookingTickets = booking.getBookingTickets();
-        for (BookingTicketModel bookingTicket : bookingTickets) {
-            TicketModel ticket = bookingTicket.getTicket();
-            ticket.setStatus(TicketStatus.AVAILABLE);
-            ticketRepository.save(ticket);
-        }
-
-        // Delete booking (cascade will delete booking tickets)
+        BookingModel booking = validateAndFetchBooking(id);
+        releaseAssociatedTickets(booking);
         bookingRepository.delete(booking);
     }
 
@@ -157,75 +111,22 @@ public class BookingServiceImpl implements BookingService {
     @Transactional(readOnly = true)
     public Page<BookingResponse> getBookingsByCustomerEmail(String customerEmail, Pageable pageable) {
         Page<BookingModel> bookingPage = bookingRepository.findByUserEmail(customerEmail, pageable);
-        List<BookingResponse> responses = bookingPage.getContent().stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
-
-        return new PageImpl<>(responses, pageable, bookingPage.getTotalElements());
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public Page<BookingResponse> getBookingsByCustomerPhone(String customerPhone, Pageable pageable) {
-        Page<BookingModel> bookingPage = bookingRepository.findByUserPhone(customerPhone, pageable);
-        List<BookingResponse> responses = bookingPage.getContent().stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
-
-        return new PageImpl<>(responses, pageable, bookingPage.getTotalElements());
+        return convertPageToResponses(bookingPage, pageable);
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<BookingResponse> getBookingsByUsername(String username) {
-        // Tìm user theo username
-        UserEntity user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with username: " + username));
-        
-        // Lấy tất cả bookings của user này
+        UserEntity user = validateAndFetchUserByUsername(username);
         List<BookingModel> userBookings = bookingRepository.findByUserId(user.getId());
-        
-        // Convert sang BookingResponse
-        return userBookings.stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<BookingResponse> getBookingsByUserId(String username) {
-        // Tìm user theo username để lấy user ID
-        UserEntity user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with username: " + username));
-        
-        Long userId = user.getId();
-        
-        // Lấy tất cả bookings của user theo ID
-        List<BookingModel> userBookings = bookingRepository.findByUserId(userId);
-        
-        // Convert sang BookingResponse
-        return userBookings.stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public Page<BookingResponse> searchBookingsByCustomerName(String customerName, Pageable pageable) {
-        Page<BookingModel> bookingPage = bookingRepository.findByUserFullNameContainingIgnoreCase(customerName,
-                pageable);
-        List<BookingResponse> responses = bookingPage.getContent().stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
-
-        return new PageImpl<>(responses, pageable, bookingPage.getTotalElements());
+        return convertBookingsToResponses(userBookings);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Page<BookingResponse> getBookingsByStatus(BookingStatus status, Pageable pageable) {
-        // Since BookingModel doesn't have status field, return empty page for now
-        return new PageImpl<>(List.of(), pageable, 0);
+        Page<BookingModel> bookingPage = bookingRepository.findByStatus(status, pageable);
+        return convertPageToResponses(bookingPage, pageable);
     }
 
     @Override
@@ -235,19 +136,13 @@ public class BookingServiceImpl implements BookingService {
         Date end = Date.from(endDate.atStartOfDay(ZoneId.systemDefault()).toInstant());
 
         Page<BookingModel> bookingPage = bookingRepository.findByBookingDateBetween(start, end, pageable);
-        List<BookingResponse> responses = bookingPage.getContent().stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
-
-        return new PageImpl<>(responses, pageable, bookingPage.getTotalElements());
+        return convertPageToResponses(bookingPage, pageable);
     }
 
     @Override
     @Transactional
     public BookingResponse updateBookingStatus(Long id, BookingStatus status) {
-        BookingModel booking = bookingRepository.findById(id)
-                .orElseThrow(() -> new BookingNotFoundException("Booking not found with id: " + id));
-
+        BookingModel booking = validateAndFetchBooking(id);
         booking.setStatus(status);
         booking = bookingRepository.save(booking);
         return convertToResponse(booking);
@@ -256,17 +151,8 @@ public class BookingServiceImpl implements BookingService {
     @Override
     @Transactional
     public BookingResponse cancelBooking(Long id) {
-        BookingModel booking = bookingRepository.findById(id)
-                .orElseThrow(() -> new BookingNotFoundException("Booking not found with id: " + id));
-
-        // Release all tickets back to AVAILABLE status
-        List<BookingTicketModel> bookingTickets = booking.getBookingTickets();
-        for (BookingTicketModel bookingTicket : bookingTickets) {
-            TicketModel ticket = bookingTicket.getTicket();
-            ticket.setStatus(TicketStatus.AVAILABLE);
-            ticketRepository.save(ticket);
-        }
-
+        BookingModel booking = validateAndFetchBooking(id);
+        releaseAssociatedTickets(booking);
         return convertToResponse(booking);
     }
 
@@ -278,9 +164,7 @@ public class BookingServiceImpl implements BookingService {
     @Override
     @Transactional(readOnly = true)
     public BigDecimal calculateBookingTotal(Long bookingId) {
-        BookingModel booking = bookingRepository.findById(bookingId)
-                .orElseThrow(() -> new BookingNotFoundException("Booking not found with id: " + bookingId));
-
+        BookingModel booking = validateAndFetchBooking(bookingId);
         return booking.getTotalAmount();
     }
 
@@ -295,6 +179,146 @@ public class BookingServiceImpl implements BookingService {
                     return basePrice.multiply(ticket.getTicketType().getPriceMultiplier());
                 })
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /**
+     * Validate and fetch user by ID
+     * Single Responsibility: Only handles user validation and fetching
+     */
+    private UserEntity validateAndFetchUser(Long userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User ", "id", userId));
+    }
+
+    /**
+     * Validate and fetch tickets by IDs
+     * Single Responsibility: Only handles ticket validation and fetching
+     */
+    private List<TicketModel> validateAndFetchTickets(List<Long> ticketIds) {
+        List<TicketModel> tickets = ticketRepository.findAllById(ticketIds);
+
+        validateTicketsExist(tickets, ticketIds);
+        validateTicketsAvailable(tickets);
+
+        return tickets;
+    }
+
+    /**
+     * Validate that all requested tickets exist
+     */
+    private void validateTicketsExist(List<TicketModel> tickets, List<Long> requestedIds) {
+        if (tickets.size() != requestedIds.size()) {
+            throw new TicketNotAvailableException("Some tickets not found");
+        }
+    }
+
+    /**
+     * Validate that all tickets are available for booking
+     */
+    private void validateTicketsAvailable(List<TicketModel> tickets) {
+        List<TicketModel> unavailableTickets = tickets.stream()
+                .filter(ticket -> ticket.getStatus() != TicketStatus.AVAILABLE)
+                .collect(Collectors.toList());
+
+        if (!unavailableTickets.isEmpty()) {
+            String unavailableIds = unavailableTickets.stream()
+                    .map(t -> t.getId().toString())
+                    .collect(Collectors.joining(", "));
+            throw new TicketNotAvailableException("Tickets are not available: " + unavailableIds);
+        }
+    }
+
+    /**
+     * Create and save booking entity
+     * Single Responsibility: Only handles booking entity creation
+     */
+    private BookingModel createAndSaveBooking(UserEntity user, BookingCreateRequest request, BigDecimal totalAmount) {
+        BookingModel booking = new BookingModel();
+        booking.setUser(user);
+        booking.setBookingDate(request.getBookingDate() != null ? request.getBookingDate() : new Date());
+        booking.setTotalAmount(totalAmount);
+        booking.setStatus(request.getStatus() != null ? request.getStatus() : BookingStatus.PENDING);
+
+        return bookingRepository.save(booking);
+    }
+
+    /**
+     * Create associations between booking and tickets
+     * Single Responsibility: Only handles booking-ticket relationship creation
+     */
+    private void createBookingTicketAssociations(BookingModel booking, List<TicketModel> tickets) {
+        tickets.forEach(ticket -> {
+            updateTicketStatus(ticket);
+            createBookingTicketRelation(booking, ticket);
+        });
+    }
+
+    /**
+     * Update ticket status to BOOKED
+     */
+    private void updateTicketStatus(TicketModel ticket) {
+        ticket.setStatus(TicketStatus.BOOKED);
+        ticketRepository.save(ticket);
+    }
+
+    /**
+     * Create booking-ticket relationship entity
+     */
+    private void createBookingTicketRelation(BookingModel booking, TicketModel ticket) {
+        BookingTicketModel bookingTicket = new BookingTicketModel();
+        bookingTicket.setBooking(booking);
+        bookingTicket.setTicket(ticket);
+        bookingTicketRepository.save(bookingTicket);
+    }
+
+    /**
+     * Validate and fetch booking by ID
+     * Single Responsibility: Only handles booking validation and fetching
+     */
+    private BookingModel validateAndFetchBooking(Long id) {
+        return bookingRepository.findById(id)
+                .orElseThrow(() -> new BookingNotFoundException("Booking not found with id: " + id));
+    }
+
+    /**
+     * Validate and fetch user by username
+     * Single Responsibility: Only handles user validation and fetching by username
+     */
+    private UserEntity validateAndFetchUserByUsername(String username) {
+        return userRepository.findByUsername(username)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with username: " + username));
+    }
+
+    /**
+     * Release all tickets associated with a booking back to AVAILABLE status
+     * Single Responsibility: Only handles ticket status release
+     */
+    private void releaseAssociatedTickets(BookingModel booking) {
+        List<BookingTicketModel> bookingTickets = booking.getBookingTickets();
+        bookingTickets.forEach(bookingTicket -> {
+            TicketModel ticket = bookingTicket.getTicket();
+            ticket.setStatus(TicketStatus.AVAILABLE);
+            ticketRepository.save(ticket);
+        });
+    }
+
+    /**
+     * Convert list of BookingModel to list of BookingResponse
+     * Single Responsibility: Only handles bulk conversion
+     */
+    private List<BookingResponse> convertBookingsToResponses(List<BookingModel> bookings) {
+        return bookings.stream()
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Convert Page of BookingModel to Page of BookingResponse
+     * Single Responsibility: Only handles page conversion
+     */
+    private Page<BookingResponse> convertPageToResponses(Page<BookingModel> bookingPage, Pageable pageable) {
+        List<BookingResponse> responses = convertBookingsToResponses(bookingPage.getContent());
+        return new PageImpl<>(responses, pageable, bookingPage.getTotalElements());
     }
 
     /**

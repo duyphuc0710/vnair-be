@@ -164,7 +164,7 @@ public class BookingController {
 
                 log.info("Getting bookings for current user: {}", username);
 
-                List<BookingResponse> data = bookingService.getBookingsByUserId(username);
+                List<BookingResponse> data = bookingService.getBookingsByUsername(username);
 
                 return new ResponseData<>(HttpStatus.OK.value(), "User bookings retrieved successfully", data);
         }
@@ -222,59 +222,9 @@ public class BookingController {
                 return new ResponseData<>(HttpStatus.OK.value(), "Bookings retrieved successfully", data);
         }
 
-        @Operation(summary = "Get bookings by customer phone", description = "Retrieve bookings for a specific customer by phone (Manager only)")
-        @ApiResponses(value = {
-                        @ApiResponse(responseCode = "200", description = "Bookings retrieved successfully"),
-                        @ApiResponse(responseCode = "403", description = "Access denied - Manager required")
-        })
-        @GetMapping("/customer/phone")
-        @PreAuthorize("hasAuthority('BOOKING:READ:ALL')")
-        public ResponseData<BookingPageResponse> getBookingsByCustomerPhone(
-                        @Parameter(description = "Customer phone") @RequestParam String phone,
-                        @Parameter(description = "Page number (0-based)") @RequestParam(defaultValue = "0") int page,
-                        @Parameter(description = "Page size") @RequestParam(defaultValue = "10") int size) {
+  
 
-                log.info("Getting bookings for customer phone: {} with page: {}, size: {}", phone, page, size);
-
-                Pageable pageable = PageRequest.of(page, size);
-                Page<BookingResponse> pageData = bookingService.getBookingsByCustomerPhone(phone, pageable);
-
-                BookingPageResponse data = new BookingPageResponse();
-                data.setContent(pageData.getContent());
-                data.setPageNumber(pageData.getNumber());
-                data.setPageSize(pageData.getSize());
-                data.setTotalPages(pageData.getTotalPages());
-                data.setTotalElements(pageData.getTotalElements());
-
-                return new ResponseData<>(HttpStatus.OK.value(), "Bookings retrieved successfully", data);
-        }
-
-        @Operation(summary = "Search bookings by customer name", description = "Search bookings by customer name with pagination (Manager only)")
-        @ApiResponses(value = {
-                        @ApiResponse(responseCode = "200", description = "Bookings retrieved successfully"),
-                        @ApiResponse(responseCode = "403", description = "Access denied - Manager required")
-        })
-        @GetMapping("/search/customer-name")
-        @PreAuthorize("hasAuthority('BOOKING:READ:ALL')")
-        public ResponseData<BookingPageResponse> searchBookingsByCustomerName(
-                        @Parameter(description = "Customer name") @RequestParam String customerName,
-                        @Parameter(description = "Page number (0-based)") @RequestParam(defaultValue = "0") int page,
-                        @Parameter(description = "Page size") @RequestParam(defaultValue = "10") int size) {
-
-                log.info("Searching bookings by customer name: {} with page: {}, size: {}", customerName, page, size);
-
-                Pageable pageable = PageRequest.of(page, size);
-                Page<BookingResponse> pageData = bookingService.searchBookingsByCustomerName(customerName, pageable);
-
-                BookingPageResponse data = new BookingPageResponse();
-                data.setContent(pageData.getContent());
-                data.setPageNumber(pageData.getNumber());
-                data.setPageSize(pageData.getSize());
-                data.setTotalPages(pageData.getTotalPages());
-                data.setTotalElements(pageData.getTotalElements());
-
-                return new ResponseData<>(HttpStatus.OK.value(), "Bookings retrieved successfully", data);
-        }
+  
 
         @Operation(summary = "Get bookings by status", description = "Retrieve bookings by status with pagination")
         @ApiResponses(value = {

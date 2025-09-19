@@ -56,4 +56,9 @@ public interface BookingRepository extends JpaRepository<BookingModel, Long> {
      */
     @Query("SELECT b FROM BookingModel b WHERE b.bookingDate >= :thirtyDaysAgo ORDER BY b.bookingDate DESC")
     Page<BookingModel> findRecentBookings(@Param("thirtyDaysAgo") Date thirtyDaysAgo, Pageable pageable);
+    
+    /**
+     * Find bookings by status
+     */
+    Page<BookingModel> findByStatus(com.vnair.air.enums.BookingStatus status, Pageable pageable);
 }

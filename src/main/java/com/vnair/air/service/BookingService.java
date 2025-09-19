@@ -43,26 +43,11 @@ public interface BookingService {
      * Get bookings by customer email
      */
     Page<BookingResponse> getBookingsByCustomerEmail(String customerEmail, Pageable pageable);
-    
-    /**
-     * Get bookings by customer phone
-     */
-    Page<BookingResponse> getBookingsByCustomerPhone(String customerPhone, Pageable pageable);
-    
-    /**
-     * Get bookings by username (for current logged-in user)
-     */
-    List<BookingResponse> getBookingsByUsername(String username);
-    
+
     /**
      * Get bookings by user ID (for current logged-in user)
      */
-    List<BookingResponse> getBookingsByUserId(String username);
-    
-    /**
-     * Search bookings by customer name
-     */
-    Page<BookingResponse> searchBookingsByCustomerName(String customerName, Pageable pageable);
+    List<BookingResponse> getBookingsByUsername(String username);
     
     /**
      * Get bookings by status
