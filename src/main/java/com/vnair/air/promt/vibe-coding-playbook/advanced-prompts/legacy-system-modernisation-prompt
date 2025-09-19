@@ -1,0 +1,71 @@
+Legacy Modernisation Template — Monolith to Evolvable Architecture
+
+Mục tiêu: Lập kế hoạch hiện đại hoá an toàn cho VNair monolith, ưu tiên Strangler/Hybrid thay vì big-bang, đảm bảo tính liên tục nghiệp vụ.
+
+Phân tích hệ thống hiện tại (điền):
+- Kiến trúc hiện tại: monolith modules user/air/common; Postgres; JWT
+- Debt: coverage ~30%, complexity một số service, integration hạn chế
+- Tính quan trọng: booking/payment = critical, uptime >=99.5%
+
+Động lực hiện đại hoá:
+- Scalability 10x, deploy độc lập, performance <200ms search
+- Bảo trì/Onboarding tốt hơn; team có thể mở rộng
+
+Ràng buộc & yêu cầu:
+- Zero data loss; backward compatibility REST
+- Ngân sách hạn chế; 1 dev chính
+
+1) So sánh chiến lược
+- Strangler: tách dần theo Bounded Context (Payment/Booking), proxy/gateway chuyển hướng; Risk: thấp; Timeline: dài; Complexity: trung bình
+- Big-bang: viết lại; Risk: cao; Timeline: dài; Không phù hợp
+- Hybrid: lift monolith lên container/K8s + tách dần; Risk: trung bình-thấp; Phù hợp
+- Event-driven: thêm event bus cho giao tiếp dần; phù hợp về sau cho webhooks/payment
+
+2) Khuyến nghị
+- Chọn: Hybrid + Strangler (bắt đầu tách Payment API, sau đó Booking)
+- Milestones:
+  M1: Chuẩn hoá API hợp đồng + gateway (reverse-proxy)
+  M2: Module Payment thành service riêng (adapter + DB shared ban đầu)
+  M3: Anti-corruption layer, tách schema dần (CDC hoặc event outbox)
+  M4: Booking service; monolith còn lại nhỏ dần
+- Đồng vận hành: API gateway định tuyến theo path/version; Feature flags
+- Đồng bộ dữ liệu: Outbox pattern + CDC hoặc job reconcile tạm thời
+- Parity validation: contract tests + synthetic traffic
+- Benchmark: so p95/throughput trước-sau mỗi milestone
+
+3) Giảm thiểu rủi ro
+- Rủi ro kỹ thuật: phân mảnh giao dịch -> dùng saga/outbox; quan sát -> thêm tracing
+- Kinh doanh: gián đoạn -> blue/green deploy + canary
+- Rollback: route về monolith nếu service mới lỗi
+- Truyền thông: changelog, maintenance windows, status page
+
+4) Lộ trình triển khai
+- Timeline: 3-6 tháng theo 4 milestone nhỏ; PR nhỏ, triển khai liên tục
+- Nâng cao kỹ năng: training CI/CD, Docker/K8s cơ bản, observability
+- Hạ tầng: bắt đầu Docker Compose -> K8s dev; secrets; monitoring
+- Vendor: none bắt buộc; cân nhắc managed DB/caching
+- Go-live criteria: error <1%, p95 <= mục tiêu, logs sạch, rollback verified
+
+5) Chuyển giao kiến thức
+- Tài liệu hoá hợp đồng API, data model, runbook
+- README dịch vụ mới, ADR (Architecture Decision Records)
+- Plan onboarding khi thêm dev
+
+Output yêu cầu (AI phải xuất đúng định dạng):
+```yaml
+modernisation:
+  strategy: "hybrid+strangler"
+  milestones:
+    - name: "api-gateway-routing"
+      success: ["tests pass","p95 stable"]
+    - name: "extract-payment-service"
+      success: ["no data loss","idempotency ok"]
+  data_sync: "outbox+reconcile"
+  rollback: ["switch gateway routes","db untouched"]
+  metrics: ["p95","error_rate","booking_success"]
+```
+
+Checklist chấp nhận:
+- [ ] Có gateway/route và rollback rõ ràng
+- [ ] Parity validation và benchmark từng bước
+- [ ] Chiến lược đồng bộ dữ liệu không mất mát

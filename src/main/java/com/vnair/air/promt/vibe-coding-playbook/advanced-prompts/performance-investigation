@@ -1,0 +1,57 @@
+Performance Investigation Template — VNair
+
+Mục tiêu: Chuẩn hoá điều tra hiệu năng với giả thuyết rõ ràng, số liệu, và trình tự low-risk.
+
+Triệu chứng (điền số liệu cụ thể):
+- Observed: [booking chậm|timeout]
+- Metrics: [p95 tăng 200ms -> 3-5s; throughput 100->20 rps; error 5-10%]
+- When: [khung giờ; concurrency]
+- Affected: [booking service, flight search, payment]
+- Recent changes: [danh sách]
+
+Context hệ thống (cố định tóm tắt): Monolith Spring Boot, Postgres, không caching, Docker; Actuator + slow query logs
+
+Ràng buộc điều tra: dev env only; cẩn trọng khi bật debug; cần staging sớm
+
+1) Hình thành giả thuyết (top 3)
+- H1: N+1 queries/thiếu index ở booking/flight search — bằng chứng: slow logs, high seq scan
+- H2: Connection pool/config JVM chưa tối ưu — bằng chứng: pool exhaustion, GC pause
+- H3: Lock contention/đồng thời booking — bằng chứng: lock waits, deadlocks
+
+2) Trình tự điều tra
+- Song song: bật slow query log + thu Actuator metrics
+- Bước 1: EXPLAIN ANALYZE các query hot; kiểm tra index
+- Bước 2: Theo dõi Hikari metrics, thread pools, GC logs
+- Bước 3: JFR/async-profiler sample CPU hotspots
+- Bước 4: Kiểm thử tải (locust/JMeter) kịch bản booking 50-100 users
+   Thời lượng: 0.5-2h/bước; Rủi ro: thấp-trung bình
+
+3) Thu thập dữ liệu
+- Metrics: p50/p95 latency, throughput, error rate, DB waits
+- Tracing: thêm trace id qua request; log cấu trúc JSON
+- Load test: kịch bản tìm kiếm + đặt vé; baseline lưu lại
+
+4) Hướng xử lý theo nguyên nhân
+- N+1/Index: thêm index, fetch join, cache read-heavy
+- Pool/GC: điều chỉnh Hikari, heap, GC params; tune thread pools
+- Locks: giảm phạm vi transaction, dùng optimistic locking, hàng đợi
+   Kiểm thử: unit + integration + load lại; triển khai: canary
+
+5) Phòng ngừa
+- Thêm dashboards (latency/error/DB waits)
+- Budget lỗi và cảnh báo sớm
+- Kiểm thử hiệu năng trong CI theo kịch bản tối thiểu
+
+Output yêu cầu (AI phải xuất đúng định dạng):
+```yaml
+perf_plan:
+   hypotheses: ["N+1 queries","pool exhaustion","lock contention"]
+   steps:
+      - "Enable slow query log; capture 15m"
+      - "Profile with JFR for 5m under load"
+   metrics: ["http.server.requests.p95","db.slow.count"]
+   fixes:
+      - cause: "N+1"
+         actions: ["add index","use join fetch"]
+   rollback: "revert index changes if regress"
+```

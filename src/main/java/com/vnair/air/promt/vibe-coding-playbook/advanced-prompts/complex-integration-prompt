@@ -1,0 +1,81 @@
+Complex Integration Template — Payment Gateway x VNair
+
+Mục tiêu: Định nghĩa kiến trúc tích hợp cổng thanh toán đáng tin cậy, có idempotency, retry, quan sát tốt; AI xuất bản thiết kế và playbook triển khai.
+
+Bối cảnh cố định:
+- System A: VNair Backend (Spring Boot REST, PostgreSQL, JWT), JSON
+- System B: Payment Gateway (MOMO/Bank/CreditCard), JSON/XML, webhooks, rate limit ~100 req/min
+- Nghiệp vụ: Create payment -> wait/confirm via webhook -> update booking -> refund on cancel
+- Số liệu: 100-500 bookings/ngày; latency mục tiêu <3s payment, <30s status update
+- Compliance: PCI awareness, audit trail đầy đủ
+
+Ràng buộc kỹ thuật:
+- Idempotency bắt buộc cho payment requests
+- Retry có backoff + circuit breaker; timeout hợp lý
+- State machine rõ ràng cho Booking/PaymentStatus
+
+1) Kiến trúc tích hợp
+- Pattern: [point-to-point|API gateway|event-driven (recommended for webhooks)]
+- Luồng dữ liệu: [sequence từ booking->payment->callback->update]
+- Ranh giới giao dịch: [khi nào commit/rollback]
+- Xử lý lỗi & retry: [network, 4xx, 5xx, timeout]
+- Quan sát/Monitoring: [metrics, logs, traces]
+
+2) Chiến lược dữ liệu
+- Mapping: DTO <-> provider response
+- Phiên bản hoá schema: [version fields]
+- Validation: [schema + business]
+- Concurrent update: [optimistic lock / version]
+- Lưu trữ/Retention: [bao lâu, mục đích audit]
+
+3) Độ tin cậy
+- Circuit breaker: [config]
+- Queue/buffer: [optional] để san tải và chống rate limit
+- DLQ/Poison: [cách xử lý webhook lỗi]
+- Idempotency: [key, store, TTL]
+- Degrade: [fallback khi gateway lỗi]
+
+4) Vận hành
+- Rollout: [canary/feature-flag]
+- Config: [application.yml profiles]
+- Monitoring/Alert: [SLA tracking, error budget]
+- Troubleshoot: [runbook: steps, queries]
+- Load test & capacity plan: [kịch bản]
+
+5) Kịch bản lỗi chủ đạo
+- [Gateway timeout] Detection:[metrics+timeout] Auto:[retry/backoff] Manual:[switch provider] Impact:[delay] Comms:[status page]
+- [Webhook mất] Detection:[late payment] Auto:[reconcile job] Manual:[manual verify] Impact:[pending] Comms:[notify]
+- [Double charge attempt] Detection:[idempotency hit] Auto:[reject] Manual:[audit] Impact:[none]
+
+6) Tiến hoá
+- Thêm provider mới: [adapter pattern]
+- Tăng tải: [scale queue/cb settings]
+- Thay đổi API: [versioned clients]
+
+Output yêu cầu (AI phải xuất đúng định dạng):
+```yaml
+payment_integration:
+  pattern: "event-driven"
+  flow:
+    - "create payment intent"
+    - "persist idempotency key"
+    - "redirect/await webhook"
+    - "verify signature & update booking"
+  reliability:
+    timeout_ms: 3000
+    retry: {strategy: "exponential", max_attempts: 3}
+    circuit_breaker: {failure_rate_threshold: 50, wait_seconds: 30}
+    idempotency: {store: "postgres", ttl: "24h"}
+  monitoring:
+    metrics: ["payment.latency","payment.errors","webhook.delta"]
+    logs: ["structured json"]
+  failure_scenarios:
+    - name: "gateway_timeout"
+      auto: ["retry","fallback if available"]
+      manual: ["notify ops","reconcile job"]
+```
+
+Checklist chấp nhận:
+- [ ] Có idempotency, retry, circuit breaker, và webhook handling
+- [ ] Rõ transaction boundaries và cập nhật trạng thái booking
+- [ ] Có runbook/monitoring và SLA

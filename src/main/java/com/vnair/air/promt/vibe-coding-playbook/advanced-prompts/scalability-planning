@@ -1,0 +1,58 @@
+Scalability Planning Template — VNair
+
+Mục tiêu: Lập kế hoạch mở rộng 10x với chi phí hợp lý, giữ SLA.
+
+Hiện trạng tóm tắt:
+- Monolith + Postgres đơn, không caching; throughput ~100 rps, p95 ~200ms cơ bản
+- DevOps hạn chế; monitoring cơ bản
+
+Mục tiêu mở rộng:
+- 1000+ rps peak, 5000+ bookings/day; p95 booking <500ms; uptime 99.9%; chi phí <$2000/tháng
+
+Thách thức chính: DB single node, không cache, monolith, payment bottlenecks
+
+1) Phân tích bottleneck
+- Ưu tiên: DB hot reads (flight search) > booking contention > payment latency
+- Giới hạn hiện tại: [ước lượng số liệu]; Loại: [kiến trúc|vận hành]
+
+2) Kiến trúc mở rộng
+- App: scale ngang pods; stateless; tune thread pools
+- DB: read-replica + query cache; Redis cho cache flight search; phân mảnh logic về sau nếu cần
+- Decomposition: tách Payment sớm; Booking tiếp theo
+- Edge/CDN: cache tĩnh; rate-limit cơ bản
+- Auto-scaling: HPA theo CPU + RPS
+
+3) Tiến hoá hạ tầng
+- Cloud: bắt đầu 1 vùng; kế hoạch đa vùng sau
+- Orchestration: Docker -> K8s; ingress + LB
+- Lưu trữ: backup/retention; archive audit
+- Mạng: giới hạn băng thông; kiểm tra latency
+
+4) Vận hành ở quy mô
+- Observability: metrics/traces/logs; SLO/SLA + alert
+- Triển khai: canary/blue-green; rollback nhanh
+- Capacity: kiểm thử tải định kỳ; tối ưu chi phí theo profile
+- Tổ chức: on-call nhẹ; runbook sự cố
+
+5) Lộ trình thực thi
+- Phase 1 (0-4w): Redis cache search + DB index + profiling — KPI: p95 -30%
+- Phase 2 (4-8w): Extract Payment + circuit breaker — KPI: error -50% khi lỗi provider
+- Phase 3 (8-12w): K8s + HPA + read-replica — KPI: sustain 500 rps
+- Phase 4 (12w+): Booking service tách; CDN
+
+6) Chi phí
+- Model sơ bộ: Redis managed + small DB replica + K8s nhỏ < $1500/tháng
+- Theo dõi cost; cảnh báo vượt ngưỡng
+
+Output yêu cầu (AI phải xuất đúng định dạng):
+```yaml
+scale_plan:
+  phases:
+    - name: "redis-cache-search"
+      target: "p95 -30%"
+    - name: "extract-payment"
+      target: "error -50% under faults"
+  infra: ["k8s","read-replica","hpa"]
+  monitoring: ["slo:p95<500ms","error<1%"]
+  rollback: "disable cache or route back to monolith"
+```

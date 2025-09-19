@@ -1,0 +1,81 @@
+Code Refactoring Template — VNair Backend
+
+Mục tiêu: Hướng dẫn AI tạo kế hoạch refactor an toàn, đo lường được, không phá vỡ hành vi booking/payment quan trọng.
+
+Bối cảnh dự án (cố định):
+- Monolith Spring Boot 3.5.4/Java 17; modules: user/air/common
+- DB PostgreSQL; JWT auth; Docker; OpenAPI
+- Yêu cầu không thay đổi: API public hiện có, schema DB, audit trail
+
+Thông tin đầu vào phải điền:
+- Phạm vi refactor: [controller|service|repository|mapper|config]
+- Thành phần/ lớp mục tiêu: [tên class/method]
+- Vấn đề hiện tại: [smells, complexity, duplication, performance]
+- Mức rủi ro nghiệp vụ: [cao|trung bình|thấp], đặc biệt nếu chạm booking/payment
+
+Mục tiêu định lượng:
+- Coverage từ ~30% lên >=80% cho phạm vi
+- Cyclomatic complexity mỗi method < 10
+- P95 response time booking < 500ms (nếu liên quan)
+
+1) Đánh giá chất lượng mã
+- Worst offenders: [liệt kê class/method + chỉ số]
+- Ưu tiên theo Impact/Effort: [bảng xếp hạng ngắn]
+- Baseline số liệu: [coverage hiện tại, complexity, p95]
+
+2) Chiến lược refactor (incremental, không big-bang)
+- Biên tự nhiên: [layer boundaries, DTO mapping, transaction scope]
+- Patterns áp dụng: [Extract Method, Introduce DTO mapper, Validation layer, Transaction boundary tightening]
+- Trình tự bước nhỏ an toàn: [step1..stepN]
+
+3) Chiến lược test
+- Characterization tests cho hành vi hiện tại
+- Unit tests cho logic tách ra
+- Integration tests (WebMvcTest/Slice) cho endpoints quan trọng
+- Performance micro-bench nếu liên quan đến hot path
+
+4) Kế hoạch triển khai
+- Checkpoints và tiêu chí pass/fail
+- Rollback: git revert/feature flag nếu thay đổi runtime
+- Code review checklist
+- Thu thập metrics tự động (JaCoCo, Sonar-like static rules)
+
+5) Quality gates
+- Coverage >= 80% cho phạm vi thay đổi
+- Không tăng số lượng code smells (SpotBugs/Checkstyle nếu có)
+- P95 không xấu đi (>10%) đối với endpoints bị ảnh hưởng
+- Definition of Done: tests xanh, build pass, docs cập nhật
+
+6) Knowledge transfer
+- Cập nhật README module hoặc Javadoc
+- Ghi lại patterns áp dụng và trade-offs
+- Checklist onboarding ngắn cho thay đổi
+
+Output yêu cầu (AI phải xuất đúng định dạng):
+```yaml
+refactor_plan:
+  scope: "service"
+  targets:
+    - class: "com.vnair.air.service.BookingService"
+      methods: ["createBooking","confirmPayment"]
+  issues: ["high complexity","duplicate mapping"]
+  goals:
+    coverage: ">=80%"
+    complexity_per_method: "<10"
+  steps:
+    - "Extract validation logic to Validator class"
+    - "Introduce MapStruct mapper for DTO <-> entity"
+    - "Add characterization tests for createBooking"
+    - "Refactor method into smaller private methods"
+  tests:
+    unit: ["BookingServiceTest"]
+    integration: ["BookingControllerIT"]
+  quality_gates: ["coverage>=80%","no new smells"]
+  rollout: ["feature-flag if needed","small PRs"]
+```
+
+Checklist chấp nhận:
+- [ ] Có baseline số liệu và mục tiêu đo lường
+- [ ] Trình tự nhỏ, có rollback
+- [ ] Bổ sung tests trước khi thay đổi lớn
+- [ ] Output đúng YAML để tooling có thể đọc
