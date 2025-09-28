@@ -15,6 +15,7 @@ import com.vnair.air.repository.BookingRepository;
 import com.vnair.air.repository.BookingTicketRepository;
 import com.vnair.air.repository.TicketRepository;
 import com.vnair.air.service.BookingService;
+import com.vnair.air.service.TicketBookingQueue;
 import com.vnair.user.model.UserEntity;
 import com.vnair.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +42,7 @@ public class BookingServiceImpl implements BookingService {
     private final BookingTicketRepository bookingTicketRepository;
     private final TicketRepository ticketRepository;
     private final UserRepository userRepository;
+    private final TicketBookingQueue ticketBookingQueue;
 
     @Override
     @Transactional
@@ -54,9 +56,11 @@ public class BookingServiceImpl implements BookingService {
 
         // Create and save booking entity
         BookingModel booking = createAndSaveBooking(user, request, totalAmount);
+        booking.setStatus(BookingStatus.PENDING);
+        booking = bookingRepository.save(booking);
 
-        // Update tickets and create booking-ticket associations
-        createBookingTicketAssociations(booking, tickets);
+        // Gửi vào queue để xử lý ticket updates
+        ticketBookingQueue.processTickets(booking.getId(), request.getTicketIds());
 
         return convertToResponse(booking);
     }
@@ -175,7 +179,7 @@ public class BookingServiceImpl implements BookingService {
         return tickets.stream()
                 .map(ticket -> {
                     // Use base price from flight or a default amount
-                    BigDecimal basePrice = new BigDecimal("100.00"); // Default base price
+                    BigDecimal basePrice = ticket.getFlight().getBasePrice(); // Lấy giá trị base price từ flight
                     return basePrice.multiply(ticket.getTicketType().getPriceMultiplier());
                 })
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
